@@ -88,9 +88,9 @@ export default function Home() {
 
     const nuevoResumen: Record<string, number> = { ...resumen };
     allData.forEach((row) => {
-      const operacion = row.Operación;
+      // const operacion = row.Operación;
       const matricula = row.Matrícula;
-      if (operacion === "Tránsito" && matricula) {
+      if (matricula) {
         nuevoResumen[matricula] = (nuevoResumen[matricula] || 0) + 1;
       }
     });
