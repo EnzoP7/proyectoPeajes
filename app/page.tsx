@@ -1,103 +1,271 @@
-import Image from "next/image";
+"use client";
+// pages/index.tsx
+import { useState } from "react";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
+
+interface PeajeRow {
+  Operación: string;
+  Fecha: string;
+  Estación: string;
+  Matrícula: string;
+  Categoría: string;
+  "Tipo lectura": string;
+  Monto: string;
+  Saldo: string;
+  Cuenta: string;
+  Observación: string;
+  [key: string]: any;
+}
+
+interface ArchivoProcesado {
+  matricula: string;
+  rango: string;
+  datos: PeajeRow[];
+}
+
+function limpiarNombreHoja(nombre: string): string {
+  return nombre.replace(/[\/\\:*?\[\]]/g, "_").slice(0, 31);
+}
+
+function acortarAnios(fechaTexto: string): string {
+  return fechaTexto.replace(
+    /(\d{2}\/\d{2}\/)(\d{4})/g,
+    (_, d, y) => `${d}${y.slice(2)}`
+  );
+}
+
+function formatFecha(valor: any): string {
+  if (typeof valor === "number") {
+    return XLSX.SSF.format("dd/mm/yyyy hh:mm:ss", valor);
+  }
+  return valor;
+}
+
+function formatMonto(valor: any): string {
+  if (typeof valor === "number") {
+    return (valor / 100).toFixed(2);
+  }
+  if (typeof valor === "string" && /^-?\d+(,\d+)?$/.test(valor)) {
+    return valor;
+  }
+  return valor;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [resumen, setResumen] = useState<Record<string, number>>({});
+  const [fuentes, setFuentes] = useState<Record<string, string[]>>({});
+  const [archivos, setArchivos] = useState<ArchivoProcesado[]>([]);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const allData: PeajeRow[] = [];
+    const nuevasFuentes: Record<string, string[]> = { ...fuentes };
+    const nuevosArchivos: ArchivoProcesado[] = [...archivos];
+
+    for (const file of Array.from(files)) {
+      const { data, header } = await readFile(file);
+      if (data.length === 0) continue;
+      allData.push(...data);
+      const matriculasUnicas = Array.from(
+        new Set(data.map((d) => d.Matrícula).filter(Boolean))
+      );
+      for (const matricula of matriculasUnicas) {
+        if (!nuevasFuentes[matricula]) nuevasFuentes[matricula] = [];
+        if (!nuevasFuentes[matricula].includes(header)) {
+          nuevasFuentes[matricula].push(header);
+        }
+        const datosFiltrados = data.filter((d) => d.Matrícula === matricula);
+        nuevosArchivos.push({
+          matricula,
+          rango: header,
+          datos: datosFiltrados,
+        });
+      }
+    }
+
+    const nuevoResumen: Record<string, number> = { ...resumen };
+    allData.forEach((row) => {
+      const operacion = row.Operación;
+      const matricula = row.Matrícula;
+      if (operacion === "Tránsito" && matricula) {
+        nuevoResumen[matricula] = (nuevoResumen[matricula] || 0) + 1;
+      }
+    });
+
+    setResumen(nuevoResumen);
+    setFuentes(nuevasFuentes);
+    setArchivos(nuevosArchivos);
+    setShowConfirm(true);
+  };
+
+  const readFile = (
+    file: File
+  ): Promise<{ data: PeajeRow[]; header: string }> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const binaryStr = event.target?.result;
+        const workbook = XLSX.read(binaryStr, { type: "binary" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const headerRange = XLSX.utils.encode_range({
+          s: { c: 0, r: 0 },
+          e: { c: 9, r: 0 },
+        });
+        const headerRow = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          range: headerRange,
+        });
+        const headerText = headerRow?.[0]?.join(" ").trim() || "";
+
+        const data: PeajeRow[] = XLSX.utils.sheet_to_json(sheet, {
+          defval: "",
+          range: 2,
+        });
+
+        resolve({ data, header: headerText });
+      };
+      reader.readAsBinaryString(file);
+    });
+  };
+
+  const exportToExcel = () => {
+    const rows = Object.entries(resumen).map(([matricula, cantidad]) => ({
+      Matrícula: matricula,
+      Peajes: cantidad,
+      Fuente: (fuentes[matricula] || []).join(" | "),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const resumenSheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
+
+    const hojasCreadas = new Set<string>();
+
+    archivos.forEach(({ matricula, rango, datos }) => {
+      const rangoSinMovimientos = rango
+        .replace(/Movimientos\s*[-–]\s*/i, "")
+        .trim();
+      const rangoCorto = acortarAnios(rangoSinMovimientos);
+      let nombreHoja = limpiarNombreHoja(`${matricula} - ${rangoCorto}`);
+      let intento = 1;
+      while (hojasCreadas.has(nombreHoja)) {
+        nombreHoja = limpiarNombreHoja(
+          `${matricula} - ${rangoCorto} (${intento})`
+        );
+        intento++;
+      }
+      hojasCreadas.add(nombreHoja);
+
+      const datosFormateados = datos.map((row) => ({
+        ...row,
+        Fecha: formatFecha(row.Fecha),
+        Monto: formatMonto(row.Monto),
+      }));
+
+      const encabezado = [[rango]]; // Fila grande en negrita
+      const contenido = XLSX.utils.json_to_sheet(datosFormateados, {
+        origin: -1,
+      });
+      const hojaFinal = Object.assign(
+        {},
+        XLSX.utils.aoa_to_sheet(encabezado),
+        contenido
+      );
+      hojaFinal["A1"].s = { font: { bold: true, sz: 14 } };
+
+      XLSX.utils.book_append_sheet(workbook, hojaFinal, nombreHoja);
+    });
+
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1)
+      .toString()
+      .padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}_${now
+      .getHours()
+      .toString()
+      .padStart(2, "0")}-${now.getMinutes().toString().padStart(2, "0")}`;
+    const fileName = `Resumen_${timestamp}.xlsx`;
+
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+      cellStyles: true,
+    });
+    const data = new Blob([excelBuffer], { type: "application/octet-stream" });
+    saveAs(data, fileName);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 py-10 px-4 sm:px-8">
+      <div className="max-w-4xl mx-auto bg-white shadow-md rounded-xl p-6">
+        <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
+          Procesador de Peajes
+        </h1>
+
+        <input
+          type="file"
+          accept=".xlsx, .xls"
+          multiple
+          onChange={handleFileUpload}
+          className="mb-6 block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4
+                     file:rounded-full file:border-0 file:text-sm file:font-semibold
+                     file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+        />
+
+        <h2 className="text-xl font-semibold mb-4 text-gray-700">
+          Resumen por Matrícula
+        </h2>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 border">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Matrícula
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Cantidad de Peajes
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Fuente
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {Object.entries(resumen).map(([matricula, cantidad]) => (
+                <tr key={matricula}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {matricula}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {cantidad}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {(fuentes[matricula] || []).join(" | ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="mt-6 text-center space-y-4">
+          <p className="text-gray-700">
+            ¿Deseas generar el archivo Excel con este resumen?
+          </p>
+          <button
+            onClick={exportToExcel}
+            className="px-6 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700"
+          >
+            Confirmar y Exportar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
