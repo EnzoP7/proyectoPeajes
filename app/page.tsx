@@ -15,7 +15,7 @@ interface PeajeRow {
   Saldo: string;
   Cuenta: string;
   Observación: string;
-  [key: string]: any;
+  [key: string]: string;
 }
 
 interface ArchivoProcesado {
@@ -35,14 +35,14 @@ function acortarAnios(fechaTexto: string): string {
   );
 }
 
-function formatFecha(valor: any): string {
+function formatFecha(valor: string): string {
   if (typeof valor === "number") {
     return XLSX.SSF.format("dd/mm/yyyy hh:mm:ss", valor);
   }
   return valor;
 }
 
-function formatMonto(valor: any): string {
+function formatMonto(valor: string): string {
   if (typeof valor === "number") {
     return (valor / 100).toFixed(2);
   }
@@ -56,7 +56,6 @@ export default function Home() {
   const [resumen, setResumen] = useState<Record<string, number>>({});
   const [fuentes, setFuentes] = useState<Record<string, string[]>>({});
   const [archivos, setArchivos] = useState<ArchivoProcesado[]>([]);
-  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -99,7 +98,6 @@ export default function Home() {
     setResumen(nuevoResumen);
     setFuentes(nuevasFuentes);
     setArchivos(nuevosArchivos);
-    setShowConfirm(true);
   };
 
   const readFile = (
@@ -121,7 +119,7 @@ export default function Home() {
           header: 1,
           range: headerRange,
         });
-        const headerText = headerRow?.[0]?.join(" ").trim() || "";
+        const headerText = (headerRow?.[0] as string[])?.join(" ").trim() || "";
 
         const data: PeajeRow[] = XLSX.utils.sheet_to_json(sheet, {
           defval: "",
@@ -168,18 +166,8 @@ export default function Home() {
         Monto: formatMonto(row.Monto),
       }));
 
-      const encabezado = [[rango]]; // Fila grande en negrita
-      const contenido = XLSX.utils.json_to_sheet(datosFormateados, {
-        origin: -1,
-      });
-      const hojaFinal = Object.assign(
-        {},
-        XLSX.utils.aoa_to_sheet(encabezado),
-        contenido
-      );
-      hojaFinal["A1"].s = { font: { bold: true, sz: 14 } };
-
-      XLSX.utils.book_append_sheet(workbook, hojaFinal, nombreHoja);
+      const hoja = XLSX.utils.json_to_sheet(datosFormateados);
+      XLSX.utils.book_append_sheet(workbook, hoja, nombreHoja);
     });
 
     const now = new Date();
@@ -194,7 +182,6 @@ export default function Home() {
     const excelBuffer = XLSX.write(workbook, {
       bookType: "xlsx",
       type: "array",
-      cellStyles: true,
     });
     const data = new Blob([excelBuffer], { type: "application/octet-stream" });
     saveAs(data, fileName);
