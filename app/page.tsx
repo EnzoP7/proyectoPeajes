@@ -88,7 +88,6 @@ export default function Home() {
 
     const nuevoResumen: Record<string, number> = { ...resumen };
     allData.forEach((row) => {
-      // const operacion = row.Operación;
       const matricula = row.Matrícula;
       if (matricula) {
         nuevoResumen[matricula] = (nuevoResumen[matricula] || 0) + 1;
@@ -139,6 +138,14 @@ export default function Home() {
       Fuente: (fuentes[matricula] || []).join(" | "),
     }));
 
+    // ➕ Agregamos fila final con total
+    const totalPeajes = Object.values(resumen).reduce((a, b) => a + b, 0);
+    rows.push({
+      Matrícula: "TOTAL",
+      Peajes: totalPeajes,
+      Fuente: "",
+    });
+
     const workbook = XLSX.utils.book_new();
     const resumenSheet = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
@@ -177,7 +184,7 @@ export default function Home() {
       .getHours()
       .toString()
       .padStart(2, "0")}-${now.getMinutes().toString().padStart(2, "0")}`;
-    const fileName = `Resumen_${timestamp}.xlsx`;
+    const fileName = `Resumen_PEAJES_${timestamp}.xlsx`;
 
     const excelBuffer = XLSX.write(workbook, {
       bookType: "xlsx",
@@ -195,6 +202,7 @@ export default function Home() {
         </h1>
 
         <input
+          id="FileInput"
           type="file"
           accept=".xlsx, .xls"
           multiple
@@ -246,6 +254,7 @@ export default function Home() {
             ¿Deseas generar el archivo Excel con este resumen?
           </p>
           <button
+            id="BotonSubmit"
             onClick={exportToExcel}
             className="px-6 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700"
           >
